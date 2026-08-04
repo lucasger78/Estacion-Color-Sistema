@@ -175,6 +175,31 @@ export function useUpdateProducto() {
   })
 }
 
+/** Actualiza precios masivamente por lotes. */
+export function useBulkUpdatePrecios() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (updates: { id: number, sin_iva: number, con_iva: number, venta: number }[]) => {
+      const batchSize = 20
+      for (let i = 0; i < updates.length; i += batchSize) {
+        const batch = updates.slice(i, i + batchSize)
+        await Promise.all(batch.map(u => 
+          supabase
+            .from('variantes')
+            .update({
+              precio_sin_iva: u.sin_iva,
+              precio_con_iva: u.con_iva,
+              precio_mostrador: u.venta,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', u.id)
+        ))
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['productos'] }),
+  })
+}
+
 /** Importa múltiples productos de forma masiva (upsert por nombre + presentación). */
 export function useImportProductos() {
   const qc = useQueryClient()

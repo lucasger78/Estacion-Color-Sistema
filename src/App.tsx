@@ -12,6 +12,7 @@ import InventarioPage  from './pages/InventarioPage'
 import FacturacionPage from './pages/FacturacionPage'
 import UsuariosPage    from './pages/UsuariosPage'
 import ProveedoresPage from './pages/ProveedoresPage'
+import ConveniosPage   from './pages/ConveniosPage'
 
 // ── Guards ──
 import ProtectedRoute  from './components/layout/ProtectedRoute'
@@ -89,6 +90,14 @@ export default function App() {
           element={
             <AdminOnlyRoute>
               <ProveedoresPage />
+            </AdminOnlyRoute>
+          }
+        />
+        <Route
+          path="/convenios"
+          element={
+            <AdminOnlyRoute>
+              <ConveniosPage />
             </AdminOnlyRoute>
           }
         />

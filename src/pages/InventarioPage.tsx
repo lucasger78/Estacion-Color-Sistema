@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import {
   useProductos, useMarcas, useUpdateProducto,
-  useImportProductos,
+  useImportProductos, useBulkUpdatePrecios,
 } from '../hooks/useProductos'
 import { formatARS } from '../utils/formatters'
 import {
@@ -66,6 +66,31 @@ function CargarProductoModal({ marcas, onClose, onSuccess }: CargarProductoModal
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(p => ({ ...p, [field]: e.target.value }))
+
+  const handlePrecioChange = (field: 'precio_sin_iva' | 'precio_con_iva', value: string) => {
+    setForm(prev => {
+      const valNum = parseFloat(value) || 0
+      const next = { ...prev, [field]: value }
+      
+      if (field === 'precio_sin_iva') {
+        if (value === '') {
+          next.precio_con_iva = ''
+          next.precio_mostrador = ''
+        } else {
+          next.precio_con_iva = (valNum * 1.21).toFixed(2)
+          next.precio_mostrador = (valNum * 1.21 * 1.20).toFixed(2)
+        }
+      } else if (field === 'precio_con_iva') {
+        if (value === '') {
+          next.precio_mostrador = ''
+        } else {
+          next.precio_mostrador = (valNum * 1.20).toFixed(2)
+        }
+      }
+      
+      return next
+    })
+  }
 
   // Guarda la nueva marca en Supabase y la selecciona
   const handleGuardarMarca = async () => {
@@ -269,12 +294,12 @@ function CargarProductoModal({ marcas, onClose, onSuccess }: CargarProductoModal
               <div>
                 <label className={labelClass}>Costo s/IVA</label>
                 <input type="number" min="0" step="0.01" value={form.precio_sin_iva}
-                  onChange={set('precio_sin_iva')} placeholder="0.00" className={inputClass} />
+                  onChange={e => handlePrecioChange('precio_sin_iva', e.target.value)} placeholder="0.00" className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>Costo c/IVA</label>
                 <input type="number" min="0" step="0.01" value={form.precio_con_iva}
-                  onChange={set('precio_con_iva')} placeholder="0.00" className={inputClass} />
+                  onChange={e => handlePrecioChange('precio_con_iva', e.target.value)} placeholder="0.00" className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>Precio Venta *</label>
@@ -374,11 +399,43 @@ function ProductRow({ producto, onSave }: { producto: Producto; onSave: (updates
     setEditing(false)
   }
 
+  const handlePriceChange = (field: keyof EditState, value: string) => {
+    setForm(prev => {
+      const valNum = parseFloat(value) || 0
+      const next = { ...prev, [field]: value }
+      
+      if (field === 'precio_costo_sin_iva') {
+        if (value === '') {
+          next.precio_costo_con_iva = ''
+          next.precio_venta = ''
+        } else {
+          next.precio_costo_con_iva = (valNum * 1.21).toFixed(2)
+          next.precio_venta = (valNum * 1.21 * 1.20).toFixed(2)
+        }
+      } else if (field === 'precio_costo_con_iva') {
+        if (value === '') {
+          next.precio_venta = ''
+        } else {
+          next.precio_venta = (valNum * 1.20).toFixed(2)
+        }
+      }
+      
+      return next
+    })
+  }
+
   const tdInput = (field: keyof EditState) => (
     <input
       type="number"
+      step="any"
       value={form[field]}
-      onChange={(e) => setForm(prev => ({ ...prev, [field]: e.target.value }))}
+      onChange={(e) => {
+        if (field === 'precio_costo_sin_iva' || field === 'precio_costo_con_iva') {
+          handlePriceChange(field, e.target.value)
+        } else {
+          setForm(prev => ({ ...prev, [field]: e.target.value }))
+        }
+      }}
       className="w-24 px-2 py-1 rounded-lg border border-primary/40 text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary/30"
     />
   )
@@ -465,6 +522,121 @@ function ProductRow({ producto, onSave }: { producto: Producto; onSave: (updates
   )
 }
 
+// ── Modal: Actualización de Precios en Bloque ───────────────────────────────
+
+function BulkPreciosModal({
+  productos,
+  marcaFiltradaNombre,
+  onClose,
+  onApply,
+  loading,
+}: {
+  productos: import('../hooks/useProductos').Producto[]
+  marcaFiltradaNombre: string
+  onClose: () => void
+  onApply: (porcentaje: number) => Promise<void>
+  loading: boolean
+}) {
+  const [porcentaje, setPorcentaje] = useState('')
+  const pct = parseFloat(porcentaje) || 0
+
+  const preview = productos.slice(0, 5).map(p => ({
+    nombre: p.nombre,
+    precioActual: p.precio_costo_sin_iva,
+    precioNuevo: parseFloat((p.precio_costo_sin_iva * (1 + pct / 100)).toFixed(2)),
+  }))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
+      <div className="absolute inset-0 bg-secondary/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 animate-fade-in">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
+              <RefreshCw className="w-5 h-5 text-orange-500" />
+            </div>
+            <div>
+              <h3 className="font-bold text-secondary">Modificar Precio S/IVA en Bloque</h3>
+              <p className="text-xs text-secondary-400">
+                {productos.length} productos · <span className="font-semibold text-primary">{marcaFiltradaNombre}</span>
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-secondary-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5">
+          {/* Porcentaje */}
+          <div>
+            <label className="block text-xs font-bold text-secondary-400 uppercase tracking-wider mb-2">
+              Porcentaje de aumento / descuento
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                step="0.01"
+                value={porcentaje}
+                onChange={e => setPorcentaje(e.target.value)}
+                placeholder="Ej: 10 para +10%  /  -5 para bajar 5%"
+                className="input-field flex-1 text-lg font-bold"
+                autoFocus
+              />
+              <span className="text-2xl font-extrabold text-secondary">%</span>
+            </div>
+            {pct !== 0 && (
+              <p className={`mt-1 text-sm font-semibold ${pct > 0 ? 'text-emerald-600' : 'text-danger'}`}>
+                {pct > 0 ? `↑ Aumento del ${pct}%` : `↓ Descuento del ${Math.abs(pct)}%`} sobre el precio s/IVA.
+                Los precios c/IVA y de venta se recalcularán automáticamente.
+              </p>
+            )}
+          </div>
+
+          {/* Preview */}
+          {pct !== 0 && preview.length > 0 && (
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-bold text-secondary-400 uppercase tracking-wider mb-3">Vista previa (primeros 5)</p>
+              <div className="space-y-2">
+                {preview.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span className="text-secondary truncate max-w-[60%]">{item.nombre}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-secondary-400 line-through text-xs">${item.precioActual.toFixed(2)}</span>
+                      <span className="font-bold text-primary">${item.precioNuevo.toFixed(2)}</span>
+                    </div>
+                  </div>
+                ))}
+                {productos.length > 5 && (
+                  <p className="text-xs text-secondary-400 text-center pt-1">… y {productos.length - 5} productos más</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Buttons */}
+          <div className="flex gap-3 pt-2">
+            <button onClick={onClose} className="btn-secondary flex-1 justify-center">Cancelar</button>
+            <button
+              onClick={() => pct !== 0 && onApply(pct)}
+              disabled={pct === 0 || loading}
+              className="btn-primary flex-1 justify-center disabled:opacity-50"
+            >
+              {loading ? (
+                <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Aplicando…</>
+              ) : (
+                <><Check className="w-4 h-4" /> Aplicar a {productos.length} productos</>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Página Inventario ───────────────────────────────────────────────────────
 
 export default function InventarioPage() {
@@ -472,16 +644,19 @@ export default function InventarioPage() {
   const filtroStock = searchParams.get('filter') || 'todos'
 
   const [search, setSearch]               = useState('')
+  const [filtroMarca, setFiltroMarca]     = useState('')
   const [importPreview, setImportPreview] = useState<ProductoImportRow[] | null>(null)
   const [importError, setImportError]     = useState<string | null>(null)
   const [importing, setImporting]         = useState(false)
   const [showModal, setShowModal]         = useState(false)
+  const [showBulkModal, setShowBulkModal] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: productos, isLoading, refetch } = useProductos(search)
   const { data: marcas = [] }                    = useMarcas()
   const updateProducto                           = useUpdateProducto()
   const importProductos                          = useImportProductos()
+  const bulkUpdatePrecios                        = useBulkUpdatePrecios()
 
   // ── Import ──
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -549,8 +724,9 @@ export default function InventarioPage() {
     else exportToCSV(data)
   }
 
-  // Filter products based on the stock filter
+  // Filter products based on stock filter + marca filter
   const productosFiltrados = productos?.filter(p => {
+    if (filtroMarca && String(p.marca_id) !== filtroMarca) return false
     if (filtroStock === 'sin_stock') return p.stock_actual <= 0
     if (filtroStock === 'critico') return p.stock_actual <= 1
     if (filtroStock === 'por_vencer') {
@@ -575,12 +751,37 @@ export default function InventarioPage() {
         />
       )}
 
+      {/* ── Modal Actualización Masiva de Precios ── */}
+      {showBulkModal && (
+        <BulkPreciosModal
+          productos={productosFiltrados ?? []}
+          marcaFiltradaNombre={filtroMarca ? (marcas.find(m => String(m.id) === filtroMarca)?.nombre ?? 'Seleccionados') : 'Todos los productos'}
+          onClose={() => setShowBulkModal(false)}
+          onApply={async (pct) => {
+            const updates = (productosFiltrados ?? []).map(p => {
+              const nuevoSinIva = p.precio_costo_sin_iva * (1 + pct / 100)
+              return {
+                id: p.id,
+                sin_iva: parseFloat(nuevoSinIva.toFixed(2)),
+                con_iva: parseFloat((nuevoSinIva * 1.21).toFixed(2)),
+                venta: parseFloat((nuevoSinIva * 1.21 * 1.20).toFixed(2)),
+              }
+            })
+            await bulkUpdatePrecios.mutateAsync(updates)
+            setShowBulkModal(false)
+            refetch()
+          }}
+          loading={bulkUpdatePrecios.isPending}
+        />
+      )}
+
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-secondary">Inventario de Productos</h2>
           <p className="text-sm text-secondary-400">
-            {productos?.length ?? 0} variantes · Edición inline habilitada
+            {productosFiltrados?.length ?? 0} de {productos?.length ?? 0} variantes
+            {filtroMarca && ` · ${marcas.find(m => String(m.id) === filtroMarca)?.nombre ?? ''}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -588,6 +789,10 @@ export default function InventarioPage() {
           <button onClick={() => setShowModal(true)} className="btn-primary">
             <Plus className="w-4 h-4" />
             Cargar producto
+          </button>
+          <button onClick={() => setShowBulkModal(true)} className="btn-secondary border-orange-300 text-orange-600 hover:bg-orange-50">
+            <RefreshCw className="w-4 h-4" />
+            Modificar precio en bloque
           </button>
           <button onClick={() => fileInputRef.current?.click()} className="btn-secondary">
             <Upload className="w-4 h-4" />
@@ -686,7 +891,23 @@ export default function InventarioPage() {
         
         <div className="flex items-center gap-2">
           <label className="text-sm font-semibold text-secondary-400 whitespace-nowrap">
-            Filtro de Stock:
+            Marca:
+          </label>
+          <select
+            value={filtroMarca}
+            onChange={e => setFiltroMarca(e.target.value)}
+            className="input-field py-1.5 px-3 min-w-[150px]"
+          >
+            <option value="">Todas las marcas</option>
+            {marcas.map(m => (
+              <option key={m.id} value={String(m.id)}>{m.nombre}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-semibold text-secondary-400 whitespace-nowrap">
+            Stock:
           </label>
           <select
             value={filtroStock}

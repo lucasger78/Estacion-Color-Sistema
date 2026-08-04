@@ -7,6 +7,7 @@ import {
   LogOut,
   X,
   Truck,
+  Tag,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { to: '/dashboard',   label: 'Dashboard',     icon: LayoutDashboard, adminOnly: true  },
   { to: '/inventario',  label: 'Inventario',    icon: Package,         adminOnly: true  },
   { to: '/proveedores', label: 'Proveedores',   icon: Truck,           adminOnly: true  },
+  { to: '/convenios',   label: 'Convenios',     icon: Tag,             adminOnly: true  },
   { to: '/facturacion', label: 'Facturación',   icon: ShoppingCart,    adminOnly: false },
   { to: '/usuarios',    label: 'Usuarios',      icon: Users,           adminOnly: true  },
 ]
