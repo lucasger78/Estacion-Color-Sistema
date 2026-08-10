@@ -127,12 +127,43 @@ export async function parseProductosFile(file: File): Promise<ProductoImportRow[
       if (field === 'nombre' || field === 'presentacion' || field === 'marca' || field === 'codigo_barras') {
         mapped[field] = String(rawValue ?? '').trim() as never
       } else {
-        // Numérico: limpiar símbolo de moneda, puntos y comas
-        const cleaned = String(rawValue ?? '0')
-          .replace(/[$\s]/g, '')
-          .replace(/\./g, '')
-          .replace(/,/g, '.')
-        const num = parseFloat(cleaned)
+        // Numérico: soporta formato argentino (1.234,56) y estándar (1234.56)
+        let str = String(rawValue ?? '0').replace(/[$\s]/g, '').trim()
+
+        // Detectar formato: si hay coma Y punto, el último separador es el decimal
+        const hasComma = str.includes(',')
+        const hasDot   = str.includes('.')
+
+        if (hasComma && hasDot) {
+          // Formato argentino: 1.234,56 → quitar puntos de miles, coma → punto
+          const lastComma = str.lastIndexOf(',')
+          const lastDot   = str.lastIndexOf('.')
+          if (lastComma > lastDot) {
+            // coma es decimal: 1.234,56
+            str = str.replace(/\./g, '').replace(',', '.')
+          } else {
+            // punto es decimal: 1,234.56
+            str = str.replace(/,/g, '')
+          }
+        } else if (hasComma && !hasDot) {
+          // Solo coma: puede ser decimal (1234,56) o miles (1,234)
+          // Si hay exactamente 3 dígitos después de la coma → miles; sino → decimal
+          const afterComma = str.split(',')[1] || ''
+          if (afterComma.length === 3) {
+            str = str.replace(',', '') // miles
+          } else {
+            str = str.replace(',', '.') // decimal
+          }
+        } else if (hasDot && !hasComma) {
+          // Solo punto: puede ser decimal (1234.56) o miles (1.234)
+          const afterDot = str.split('.')[1] || ''
+          if (afterDot.length === 3 && !str.includes('.', str.indexOf('.') + 1)) {
+            str = str.replace('.', '') // miles
+          }
+          // sino lo dejamos como está (punto decimal normal)
+        }
+
+        const num = parseFloat(str)
         mapped[field] = (isNaN(num) ? 0 : num) as never
       }
     }

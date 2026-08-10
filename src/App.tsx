@@ -6,7 +6,6 @@ import MainLayout from './components/layout/MainLayout'
 
 // ── Páginas ──
 import LoginPage    from './pages/LoginPage'
-import RegisterPage from './pages/RegisterPage'
 import DashboardPage   from './pages/DashboardPage'
 import InventarioPage  from './pages/InventarioPage'
 import FacturacionPage from './pages/FacturacionPage'
@@ -45,10 +44,9 @@ export default function App() {
         path="/login"
         element={session ? <Navigate to={homePath} replace /> : <LoginPage />}
       />
-      <Route
-        path="/register"
-        element={session ? <Navigate to={homePath} replace /> : <RegisterPage />}
-      />
+      {/* Ruta de registro deshabilitada por seguridad — solo admins pueden crear usuarios */}
+      <Route path="/register" element={<Navigate to="/login" replace />} />
+
 
       {/* Rutas protegidas con layout */}
       <Route
@@ -106,8 +104,9 @@ export default function App() {
         <Route path="/facturacion" element={<FacturacionPage />} />
       </Route>
 
-      {/* Fallback */}
-      <Route path="*" element={<Navigate to={homePath} replace />} />
+      {/* Fallback: sin sesión → login, con sesión → home */}
+      <Route path="*" element={<Navigate to={session ? homePath : '/login'} replace />} />
+
     </Routes>
   )
 }

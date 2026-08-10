@@ -18,4 +18,13 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
   },
 })
 
+// Cliente secundario sin persistencia de sesión para que el Admin cree usuarios sin desloguearse
+export const supabaseSignupHelper = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    autoRefreshToken:    false,
+    persistSession:      false,
+    detectSessionInUrl:  false,
+  },
+})
+
 export default supabase

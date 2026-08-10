@@ -114,7 +114,7 @@ function HistorialVentas() {
             <ul className="mt-2 space-y-0.5">
               {v.ventas_detalle.map((d) => (
                 <li key={d.id} className="text-xs text-secondary-400">
-                  × {d.cantidad} {d.productos?.nombre}{d.variantes?.variante ? ` — ${d.variantes.variante}` : ''}
+                  × {d.cantidad} {d.nombre_producto ?? d.productos?.nombre ?? 'Producto eliminado'}
                 </li>
               ))}
             </ul>

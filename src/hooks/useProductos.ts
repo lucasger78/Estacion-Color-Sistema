@@ -200,17 +200,104 @@ export function useBulkUpdatePrecios() {
   })
 }
 
-/** Importa múltiples productos de forma masiva (upsert por nombre + presentación). */
+/** Importa múltiples productos de forma masiva usando lotes para evitar timeouts. */
 export function useImportProductos() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (productos: ProductoCreate[]) => {
-      const { data, error } = await supabase
-        .from('productos')
-        .upsert(productos, { onConflict: 'nombre,presentacion', ignoreDuplicates: false })
-        .select()
-      if (error) throw error
-      return data
+      const BATCH = 50
+
+      // 1. Obtener mapas en memoria de lo que ya existe
+      const { data: dbProds, error: errProds } = await supabase
+        .from('productos').select('id, nombre, marca_id')
+      if (errProds) throw errProds
+
+      const { data: dbVars, error: errVars } = await supabase
+        .from('variantes').select('id, producto_id, variante')
+      if (errVars) throw errVars
+
+      const prodMap = new Map<string, number>()
+      ;(dbProds || []).forEach((p: any) => {
+        prodMap.set(`${p.nombre.toLowerCase().trim()}_${p.marca_id || 0}`, p.id)
+      })
+
+      const varMap = new Map<string, number>()
+      ;(dbVars || []).forEach((v: any) => {
+        varMap.set(`${v.producto_id}_${v.variante.toLowerCase().trim()}`, v.id)
+      })
+
+      // 2. Detectar productos base nuevos e insertarlos en lote
+      const prodNuevos: { nombre: string; marca_id: number | null }[] = []
+      const prodKeys: string[] = []
+
+      for (const p of productos) {
+        const key = `${p.nombre.toLowerCase().trim()}_${p.marca_id || 0}`
+        if (!prodMap.has(key)) {
+          // Solo agregar si no está ya en la lista de nuevos
+          if (!prodKeys.includes(key)) {
+            prodNuevos.push({ nombre: p.nombre.trim(), marca_id: p.marca_id ?? null })
+            prodKeys.push(key)
+          }
+        }
+      }
+
+      // Insertar productos nuevos en lotes
+      for (let i = 0; i < prodNuevos.length; i += BATCH) {
+        const batch = prodNuevos.slice(i, i + BATCH)
+        const { data: inserted, error: insErr } = await supabase
+          .from('productos').insert(batch).select('id, nombre, marca_id')
+        if (insErr) throw insErr
+        ;(inserted || []).forEach((p: any) => {
+          prodMap.set(`${p.nombre.toLowerCase().trim()}_${p.marca_id || 0}`, p.id)
+        })
+      }
+
+      // 3. Preparar listas de variantes a insertar o actualizar
+      const varInsertar: any[] = []
+      const varActualizar: { id: number; data: any }[] = []
+
+      for (const p of productos) {
+        const prodKey = `${p.nombre.toLowerCase().trim()}_${p.marca_id || 0}`
+        const prodId = prodMap.get(prodKey)
+        if (!prodId) continue
+
+        const varName = p.presentacion?.trim() || p.nombre.trim()
+        const varKey  = `${prodId}_${varName.toLowerCase().trim()}`
+        const existId = varMap.get(varKey)
+
+        const varData = {
+          precio_sin_iva:    Math.round((p.precio_costo_sin_iva || 0) * 100) / 100,
+          precio_con_iva:    Math.round((p.precio_costo_con_iva || 0) * 100) / 100,
+          precio_mostrador:  Math.round((p.precio_venta || 0) * 100) / 100,
+          stock_disponible:  Math.round(p.stock_actual || 0),
+          stock_actual:      Math.round(p.stock_actual || 0),
+          fecha_vencimiento: p.fecha_vencimiento || null,
+        }
+
+
+        if (existId) {
+          varActualizar.push({ id: existId, data: { ...varData, updated_at: new Date().toISOString() } })
+        } else {
+          varInsertar.push({ producto_id: prodId, variante: varName, ...varData })
+        }
+      }
+
+      // 4. Insertar variantes nuevas en lotes de 50
+      for (let i = 0; i < varInsertar.length; i += BATCH) {
+        const batch = varInsertar.slice(i, i + BATCH)
+        const { error } = await supabase.from('variantes').insert(batch)
+        if (error) throw error
+      }
+
+      // 5. Actualizar variantes existentes en paralelo (lotes de 20)
+      for (let i = 0; i < varActualizar.length; i += 20) {
+        const batch = varActualizar.slice(i, i + 20)
+        await Promise.all(batch.map(({ id, data }) =>
+          supabase.from('variantes').update(data).eq('id', id)
+        ))
+      }
+
+      return { success: true }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['productos'] }),
   })
@@ -228,5 +315,86 @@ export function useToggleProductoActivo() {
       if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['productos'] }),
+  })
+}
+
+/** Elimina físicamente variantes y productos huérfanos de Supabase.
+ *  Requiere que ventas_detalle.variante_id tenga ON DELETE SET NULL
+ *  (ver fk_set_null_ventas_detalle.sql) — el historial de ventas se conserva. */
+export function useDeleteVariantes() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: number[]) => {
+      // Paso 1: obtener los producto_id antes de borrar
+      const { data: variantesData, error: fetchErr } = await supabase
+        .from('variantes')
+        .select('id, producto_id')
+        .in('id', ids)
+      if (fetchErr) throw fetchErr
+
+      const productoIds = [...new Set((variantesData || []).map((v: any) => v.producto_id))]
+
+      // Paso 2: eliminar las variantes
+      // (ventas_detalle.variante_id queda en NULL automáticamente por ON DELETE SET NULL)
+      const { error: varErr } = await supabase
+        .from('variantes')
+        .delete()
+        .in('id', ids)
+      if (varErr) throw varErr
+
+      // Paso 3: eliminar los productos base que ya no tienen variantes
+      if (productoIds.length > 0) {
+        const { data: remaining } = await supabase
+          .from('variantes')
+          .select('producto_id')
+          .in('producto_id', productoIds)
+
+        const conVariantes = new Set((remaining || []).map((v: any) => v.producto_id))
+        const huerfanos = productoIds.filter(pid => !conVariantes.has(pid))
+
+        if (huerfanos.length > 0) {
+          await supabase.from('productos').delete().in('id', huerfanos)
+        }
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['productos'] })
+    },
+  })
+}
+
+/** Limpia el catálogo completo: borra todas las variantes y productos.
+ *  Conserva: marcas, convenios, usuarios y ventas (historial).
+ *  Requiere que las FK de ventas_detalle sean ON DELETE SET NULL
+ *  (ver migracion_historial_dinamico.sql). */
+export function useLimpiarCatalogo() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      // 1. Liberar referencias en ventas_detalle (NULL out producto_id y variante_id)
+      //    Esto funciona solo si las FK son ON DELETE SET NULL (ya migradas)
+      const { error: nullErr } = await supabase
+        .from('ventas_detalle')
+        .update({ variante_id: null, producto_id: null })
+        .not('id', 'is', null) // aplica a todos los registros
+      if (nullErr) throw nullErr
+
+      // 2. Borrar todas las variantes
+      const { error: varErr } = await supabase
+        .from('variantes')
+        .delete()
+        .not('id', 'is', null)
+      if (varErr) throw varErr
+
+      // 3. Borrar todos los productos (SIN tocar marcas)
+      const { error: prodErr } = await supabase
+        .from('productos')
+        .delete()
+        .not('id', 'is', null)
+      if (prodErr) throw prodErr
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['productos'] })
+    },
   })
 }

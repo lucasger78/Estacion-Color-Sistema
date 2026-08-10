@@ -15,11 +15,12 @@ export interface VentaItem {
 
 export interface VentaDetalle {
   id:              string
-  producto_id:     number
+  producto_id:     number | null
   variante_id:     number | null
   cantidad:        number
   precio_unitario: number
   subtotal:        number
+  nombre_producto: string | null  // snapshot guardado al momento de la venta
   productos?:      { nombre: string } | null
   variantes?:      { variante: string } | null
 }
@@ -61,6 +62,7 @@ export function useVentasHoy() {
             subtotal,
             producto_id,
             variante_id,
+            nombre_producto,
             productos ( nombre ),
             variantes ( variante )
           )

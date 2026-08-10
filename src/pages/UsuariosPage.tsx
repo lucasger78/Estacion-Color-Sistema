@@ -5,7 +5,7 @@ import {
   ChevronUp, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
   UserPlus, X, Eye, EyeOff, Loader2,
 } from 'lucide-react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, supabaseSignupHelper } from '../lib/supabaseClient'
 import { formatDate } from '../utils/formatters'
 import type { UserProfile } from '../context/AuthContext'
 
@@ -75,16 +75,33 @@ function AgregarUsuarioModal({ onClose, onSuccess }: AgregarUsuarioModalProps) {
     e.preventDefault()
     setError(null)
 
-    if (!form.nombre_completo.trim() || !form.email.trim() || form.password.length < 6) {
-      setError('Completá todos los campos. La contraseña debe tener al menos 6 caracteres.')
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!form.nombre_completo.trim()) {
+      setError('El nombre completo es obligatorio.')
+      return
+    }
+    if (!emailRegex.test(form.email.trim())) {
+      setError('Ingresá un email válido.')
+      return
+    }
+    if (form.password.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres.')
+      return
+    }
+    if (!/[A-Z]/.test(form.password)) {
+      setError('La contraseña debe contener al menos una letra mayúscula.')
+      return
+    }
+    if (!/[0-9]/.test(form.password)) {
+      setError('La contraseña debe contener al menos un número.')
       return
     }
 
     setLoading(true)
     try {
-      // 1. Crear usuario en Supabase Auth (usando signUp con admin API no disponible en anon key)
-      // Usamos la función de registro estándar y luego actualizamos el perfil
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      // 1. Crear usuario en Supabase Auth usando el cliente sin persistencia de sesión
+      // para evitar desloguear al administrador.
+      const { data: authData, error: authError } = await supabaseSignupHelper.auth.signUp({
         email:    form.email.trim(),
         password: form.password,
         options: {

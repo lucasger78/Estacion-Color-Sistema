@@ -1,6 +1,5 @@
-import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Eye, EyeOff, LogIn, Paintbrush2, AlertCircle } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { Eye, EyeOff, LogIn, Paintbrush2, AlertCircle, Lock } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 export default function LoginPage() {
@@ -11,18 +10,32 @@ export default function LoginPage() {
   const [showPwd,  setShowPwd]  = useState(false)
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
+  const [blocked,  setBlocked]  = useState(false)
+  const failCount = useRef(0)
+  const blockTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (blocked) return
     setError(null)
     setLoading(true)
     try {
       await signIn(email.trim(), password)
-      // La redirección la maneja App.tsx automáticamente cuando cambia la sesión
     } catch (err: unknown) {
+      failCount.current += 1
       const msg = err instanceof Error ? err.message : 'Error al iniciar sesión'
       if (msg.includes('Invalid login')) {
-        setError('Email o contraseña incorrectos.')
+        if (failCount.current >= 5) {
+          setBlocked(true)
+          setError('Demasiados intentos fallidos. Esperá 30 segundos antes de volver a intentar.')
+          blockTimer.current = setTimeout(() => {
+            setBlocked(false)
+            failCount.current = 0
+            setError(null)
+          }, 30_000)
+        } else {
+          setError(`Email o contraseña incorrectos. (Intento ${failCount.current}/5)`)
+        }
       } else if (msg.includes('Email not confirmed')) {
         setError('Por favor, confirmá tu email antes de ingresar.')
       } else {
@@ -145,30 +158,32 @@ export default function LoginPage() {
 
             {/* Botón */}
             <button
-              id="btn-login"
-              type="submit"
-              disabled={loading}
-              className="btn-primary w-full justify-center py-3 text-base"
-            >
-              {loading ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Ingresando…
-                </>
-              ) : (
-                <>
-                  <LogIn className="w-4 h-4" />
-                  Ingresar
-                </>
-              )}
-            </button>
-          </form>
+            id="btn-login"
+            type="submit"
+            disabled={loading || blocked}
+            className="btn-primary w-full justify-center py-3 text-base disabled:opacity-60"
+          >
+            {blocked ? (
+              <>
+                <Lock className="w-4 h-4" />
+                Bloqueado temporalmente…
+              </>
+            ) : loading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Ingresando…
+              </>
+            ) : (
+              <>
+                <LogIn className="w-4 h-4" />
+                Ingresar
+              </>
+            )}
+          </button>
+        </form>
 
-          <p className="text-center text-sm text-secondary-400 mt-6">
-            ¿No tenés cuenta?{' '}
-            <Link to="/register" className="text-primary font-semibold hover:underline">
-              Registrate aquí
-            </Link>
+          <p className="text-center text-xs text-secondary-400 mt-6">
+            Sistema de uso interno · Estación Color
           </p>
         </div>
       </div>

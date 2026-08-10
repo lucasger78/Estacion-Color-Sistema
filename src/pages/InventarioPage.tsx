@@ -1,12 +1,14 @@
 import React, { useState, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import Swal from 'sweetalert2'
 import {
   Search, Plus, Upload, Download, RefreshCw,
   Edit3, Package, Check, X, AlertTriangle, FileSpreadsheet,
-  Loader2,
+  Loader2, Trash2, DatabaseBackup
 } from 'lucide-react'
 import {
   useProductos, useMarcas, useUpdateProducto,
-  useImportProductos, useBulkUpdatePrecios,
+  useImportProductos, useBulkUpdatePrecios, useDeleteVariantes, useLimpiarCatalogo,
 } from '../hooks/useProductos'
 import { formatARS } from '../utils/formatters'
 import {
@@ -363,7 +365,19 @@ function CargarProductoModal({ marcas, onClose, onSuccess }: CargarProductoModal
 
 // ── Fila editable ───────────────────────────────────────────────────────────
 
-function ProductRow({ producto, onSave }: { producto: Producto; onSave: (updates: Partial<Producto> & { id: number }) => void }) {
+function ProductRow({
+  producto,
+  isSelected,
+  onSelect,
+  onSave,
+  onDelete
+}: {
+  producto: Producto
+  isSelected: boolean
+  onSelect: (selected: boolean) => void
+  onSave: (updates: Partial<Producto> & { id: number }) => void
+  onDelete: () => void
+}) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<EditState>({
     precio_costo_sin_iva: String(producto.precio_costo_sin_iva),
@@ -442,6 +456,14 @@ function ProductRow({ producto, onSave }: { producto: Producto; onSave: (updates
 
   return (
     <tr className="table-row">
+      <td className="table-cell text-center w-10">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={(e) => onSelect(e.target.checked)}
+          className="rounded text-primary focus:ring-primary border-slate-300 w-4 h-4 cursor-pointer"
+        />
+      </td>
       <td className="table-cell">
         <div>
           <p className="font-semibold text-secondary text-sm">{producto.nombre}</p>
@@ -500,7 +522,7 @@ function ProductRow({ producto, onSave }: { producto: Producto; onSave: (updates
       </td>
       <td className="table-cell text-center">
         {editing ? (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 justify-center">
             <button onClick={handleSave} className="p-1.5 rounded-lg bg-success text-white hover:bg-emerald-600 transition-colors">
               <Check className="w-3.5 h-3.5" />
             </button>
@@ -509,13 +531,22 @@ function ProductRow({ producto, onSave }: { producto: Producto; onSave: (updates
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setEditing(true)}
-            className="p-1.5 rounded-lg hover:bg-primary-soft hover:text-primary text-secondary-400 transition-colors"
-            title="Editar"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-1 justify-center">
+            <button
+              onClick={() => setEditing(true)}
+              className="p-1.5 rounded-lg hover:bg-primary-soft hover:text-primary text-secondary-400 transition-colors"
+              title="Editar"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onDelete}
+              className="p-1.5 rounded-lg hover:bg-danger-light hover:text-danger text-secondary-400 transition-colors"
+              title="Eliminar"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         )}
       </td>
     </tr>
@@ -652,11 +683,16 @@ export default function InventarioPage() {
   const [showBulkModal, setShowBulkModal] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const [selectedIds, setSelectedIds]     = useState<number[]>([])
+
+  const qc = useQueryClient()
   const { data: productos, isLoading, refetch } = useProductos(search)
   const { data: marcas = [] }                    = useMarcas()
   const updateProducto                           = useUpdateProducto()
   const importProductos                          = useImportProductos()
   const bulkUpdatePrecios                        = useBulkUpdatePrecios()
+  const deleteVariantes                          = useDeleteVariantes()
+  const limpiarCatalogo                          = useLimpiarCatalogo()
 
   // ── Import ──
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -673,17 +709,46 @@ export default function InventarioPage() {
   }
 
   const handleImportConfirm = async () => {
-    if (!importPreview || !marcas) return
+    if (!importPreview) return
     setImporting(true)
     try {
-      const marcaMap = new Map(marcas.map(m => [m.nombre.toLowerCase(), m.id]))
+      // 1. Obtener nombres de marcas únicos y no vacíos
+      const marcasUnicasExcel = Array.from(new Set(
+        importPreview
+          .map(row => row.marca.trim().toUpperCase())
+          .filter(name => name.length > 0)
+      ))
 
+      // 2. Traer marcas de la DB actuales
+      const { data: dbBrands, error: bErr } = await supabase.from('marcas').select('*')
+      if (bErr) throw bErr
+
+      const brandMap = new Map<string, number>()
+      if (dbBrands) {
+        dbBrands.forEach(b => brandMap.set(b.nombre.toUpperCase().trim(), b.id))
+      }
+
+      // 3. Crear marcas faltantes
+      for (const brandName of marcasUnicasExcel) {
+        if (!brandMap.has(brandName)) {
+          const { data: newBrand, error: insertErr } = await supabase
+            .from('marcas')
+            .insert({ nombre: brandName })
+            .select('id')
+            .single()
+
+          if (insertErr) throw insertErr
+          brandMap.set(brandName, newBrand.id)
+        }
+      }
+
+      // 4. Mapear productos vinculando marca_id correcta
       const prods = importPreview.map(row => {
-        const marcaKey = row.marca.toLowerCase().trim()
+        const brandKey = row.marca.trim().toUpperCase()
         return {
           nombre:               row.nombre,
           presentacion:         row.presentacion || null,
-          marca_id:             marcaMap.get(marcaKey) ?? null,
+          marca_id:             brandMap.get(brandKey) ?? null,
           precio_costo_sin_iva: row.precio_costo_sin_iva,
           precio_costo_con_iva: row.precio_costo_con_iva,
           precio_venta:         row.precio_venta,
@@ -698,12 +763,21 @@ export default function InventarioPage() {
       await importProductos.mutateAsync(prods)
       setImportPreview(null)
       refetch()
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : 'Error al importar productos.')
+      qc.invalidateQueries({ queryKey: ['marcas'] })
+    } catch (err: any) {
+      // Extraer detalle completo del error (Supabase devuelve objetos, no Error estándar)
+      const msg = err?.message
+        || err?.error_description
+        || (err?.details ? `${err.code}: ${err.details}` : null)
+        || (typeof err === 'string' ? err : null)
+        || JSON.stringify(err)
+        || 'Error al importar productos.'
+      setImportError(msg)
     } finally {
       setImporting(false)
     }
   }
+
 
   // ── Export ──
   const handleExport = (format: 'xlsx' | 'csv') => {
@@ -722,6 +796,159 @@ export default function InventarioPage() {
     }))
     if (format === 'xlsx') exportToExcel(data)
     else exportToCSV(data)
+  }
+
+  // Standalone Brand Creation
+  const handleCrearNuevaMarcaStandalone = async () => {
+    const { value: brandName } = await Swal.fire({
+      title: 'Crear Nueva Marca',
+      input: 'text',
+      inputLabel: 'Nombre de la marca',
+      inputPlaceholder: 'Ej: VICTORIA, ALBA...',
+      showCancelButton: true,
+      confirmButtonText: 'Crear',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#E55B2B',
+      inputValidator: (value) => {
+        if (!value) {
+          return '¡Tenés que ingresar un nombre!'
+        }
+      }
+    })
+
+    if (brandName) {
+      try {
+        const { error } = await supabase
+          .from('marcas')
+          .insert({ nombre: brandName.trim().toUpperCase() })
+        if (error) throw error
+
+        await Swal.fire({
+          title: '¡Creada!',
+          text: `La marca "${brandName.trim().toUpperCase()}" se creó correctamente.`,
+          icon: 'success',
+          timer: 1500,
+          showConfirmButton: false,
+        })
+
+        qc.invalidateQueries({ queryKey: ['marcas'] })
+      } catch (err: any) {
+        Swal.fire('Error', err.message || 'No se pudo crear la marca.', 'error')
+      }
+    }
+  }
+
+  const handleSingleDelete = async (producto: Producto) => {
+    const result = await Swal.fire({
+      title: '¿Eliminar producto?',
+      text: `Esta acción eliminará "${producto.nombre}" definitivamente del inventario y no se puede deshacer.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#E55B2B',
+    })
+
+    if (result.isConfirmed) {
+      try {
+        await deleteVariantes.mutateAsync([producto.id])
+        Swal.fire({
+          title: '¡Eliminado!',
+          text: 'El producto fue eliminado del inventario.',
+          icon: 'success',
+          timer: 1500,
+          showConfirmButton: false,
+        })
+        setSelectedIds(prev => prev.filter(id => id !== producto.id))
+      } catch (err: any) {
+        Swal.fire('Error', err.message || 'No se pudo eliminar el producto.', 'error')
+      }
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    const result = await Swal.fire({
+      title: `¿Eliminar ${selectedIds.length} productos?`,
+      text: 'Esta acción eliminará todos los elementos seleccionados definitivamente y no se puede deshacer.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Sí, eliminar todos',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#E55B2B',
+    })
+
+    if (result.isConfirmed) {
+      try {
+        await deleteVariantes.mutateAsync(selectedIds)
+        Swal.fire({
+          title: '¡Eliminados!',
+          text: `${selectedIds.length} productos fueron eliminados.`,
+          icon: 'success',
+          timer: 1500,
+          showConfirmButton: false,
+        })
+        setSelectedIds([])
+      } catch (err: any) {
+        Swal.fire('Error', err.message || 'No se pudieron eliminar los productos.', 'error')
+      }
+    }
+  }
+
+  const handleLimpiarCatalogo = async () => {
+    // Primera confirmación
+    const paso1 = await Swal.fire({
+      title: '⚠️ Limpiar catálogo completo',
+      html: `<p class="text-sm text-gray-600">Esta acción eliminará <strong>todos los productos y variantes</strong> del inventario.</p>
+             <p class="text-sm text-gray-600 mt-2">Las marcas, convenios, usuarios y el historial de ventas se conservarán.</p>`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Continuar →',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#dc2626',
+    })
+    if (!paso1.isConfirmed) return
+
+    // Segunda confirmación — escribir CONFIRMAR
+    const paso2 = await Swal.fire({
+      title: 'Confirmación final',
+      html: `<p class="text-sm text-gray-600 mb-3">Escribí <strong>LIMPIAR</strong> para confirmar la eliminación de todo el catálogo.</p>`,
+      input: 'text',
+      inputPlaceholder: 'LIMPIAR',
+      showCancelButton: true,
+      confirmButtonText: 'Eliminar todo',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#dc2626',
+      inputValidator: (val) => {
+        if (val !== 'LIMPIAR') return 'Debés escribir LIMPIAR exactamente'
+      }
+    })
+    if (!paso2.isConfirmed) return
+
+    try {
+      await limpiarCatalogo.mutateAsync()
+      await Swal.fire({
+        title: '¡Catálogo limpio!',
+        text: 'Todos los productos y variantes fueron eliminados. Podés importar el nuevo catálogo.',
+        icon: 'success',
+        confirmButtonColor: '#E55B2B',
+      })
+      setSelectedIds([])
+      refetch()
+    } catch (err: any) {
+      Swal.fire('Error', err.message || 'No se pudo limpiar el catálogo.', 'error')
+    }
+  }
+
+  const handleToggleSelect = (id: number, selected: boolean) => {
+    setSelectedIds(prev => selected ? [...prev, id] : prev.filter(x => x !== id))
+  }
+
+  const handleToggleSelectAll = (selected: boolean) => {
+    if (selected && productosFiltrados) {
+      setSelectedIds(productosFiltrados.map(p => p.id))
+    } else {
+      setSelectedIds([])
+    }
   }
 
   // Filter products based on stock filter + marca filter
@@ -790,6 +1017,10 @@ export default function InventarioPage() {
             <Plus className="w-4 h-4" />
             Cargar producto
           </button>
+          <button onClick={handleCrearNuevaMarcaStandalone} className="btn-secondary">
+            <Plus className="w-4 h-4" />
+            Nueva marca
+          </button>
           <button onClick={() => setShowBulkModal(true)} className="btn-secondary border-orange-300 text-orange-600 hover:bg-orange-50">
             <RefreshCw className="w-4 h-4" />
             Modificar precio en bloque
@@ -807,8 +1038,37 @@ export default function InventarioPage() {
             <Download className="w-4 h-4" />
             .csv
           </button>
+          <button
+            onClick={handleLimpiarCatalogo}
+            disabled={limpiarCatalogo.isPending}
+            className="btn-secondary border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            {limpiarCatalogo.isPending
+              ? <><span className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> Limpiando…</>
+              : <><DatabaseBackup className="w-4 h-4" /> Limpiar catálogo</>
+            }
+          </button>
         </div>
       </div>
+
+      {/* ── Barra de acciones por lote ── */}
+      {selectedIds.length > 0 && (
+        <div className="flex items-center justify-between p-4 rounded-2xl bg-red-50 border border-red-100 animate-fade-in shadow-sm">
+          <div className="flex items-center gap-2 text-danger">
+            <AlertTriangle className="w-5 h-5 flex-shrink-0 animate-bounce" />
+            <span className="font-semibold text-sm">
+              Has seleccionado {selectedIds.length} producto{selectedIds.length > 1 ? 's' : ''} para eliminar.
+            </span>
+          </div>
+          <button
+            onClick={handleBulkDelete}
+            className="flex items-center gap-2 py-2 px-4 rounded-xl bg-danger hover:bg-red-600 text-white text-sm font-semibold transition-all shadow-md shadow-red-200"
+          >
+            <Trash2 className="w-4 h-4" />
+            Eliminar seleccionados
+          </button>
+        </div>
+      )}
 
       {/* ── Error de importación ── */}
       {importError && (
@@ -941,7 +1201,15 @@ export default function InventarioPage() {
             <table className="w-full">
               <thead>
                 <tr>
-                  <th className="table-header text-left rounded-tl-2xl">Producto</th>
+                  <th className="table-header w-10 text-center rounded-tl-2xl">
+                    <input
+                      type="checkbox"
+                      checked={productosFiltrados.length > 0 && selectedIds.length === productosFiltrados.length}
+                      onChange={(e) => handleToggleSelectAll(e.target.checked)}
+                      className="rounded text-primary focus:ring-primary border-slate-300 w-4 h-4 cursor-pointer"
+                    />
+                  </th>
+                  <th className="table-header text-left">Producto</th>
                   <th className="table-header">Marca</th>
                   <th className="table-header">Costo S/IVA</th>
                   <th className="table-header">Costo C/IVA</th>
@@ -949,7 +1217,7 @@ export default function InventarioPage() {
                   <th className="table-header">Stock</th>
                   <th className="table-header">Estado</th>
                   <th className="table-header">Vencimiento</th>
-                  <th className="table-header rounded-tr-2xl">Editar</th>
+                  <th className="table-header rounded-tr-2xl">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -957,7 +1225,10 @@ export default function InventarioPage() {
                   <ProductRow
                     key={p.id}
                     producto={p}
+                    isSelected={selectedIds.includes(p.id)}
+                    onSelect={(sel) => handleToggleSelect(p.id, sel)}
                     onSave={(updates) => updateProducto.mutate(updates)}
+                    onDelete={() => handleSingleDelete(p)}
                   />
                 ))}
               </tbody>

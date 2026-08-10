@@ -1,4 +1,3 @@
-import React from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
@@ -7,14 +6,17 @@ interface Props {
 }
 
 /**
- * ProtectedRoute: Redirige a /login si el usuario no tiene sesión activa.
+ * ProtectedRoute: Redirige a /login si el usuario:
+ * - No tiene sesión activa
+ * - Su cuenta está desactivada (activo = false)
  */
 export default function ProtectedRoute({ children }: Props) {
-  const { session, isLoading } = useAuth()
+  const { session, isLoading, profile } = useAuth()
 
   if (isLoading) return null // El LoadingScreen se muestra en App.tsx
 
-  if (!session) {
+  // Sin sesión o cuenta desactivada → fuera
+  if (!session || profile?.activo === false) {
     return <Navigate to="/login" replace />
   }
 
