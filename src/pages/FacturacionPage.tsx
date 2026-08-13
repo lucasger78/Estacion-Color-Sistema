@@ -268,8 +268,9 @@ export default function FacturacionPage() {
                 {/* Resultados */}
                 {showResults && search.length >= 2 && productos && productos.length > 0 && (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-card-lg border border-slate-100 z-10 max-h-64 overflow-y-auto animate-fade-in">
-                    {productos.slice(0, 8).map((p) => (
+                    {productos.map((p) => (
                       <button
+
                         key={p.id}
                         onClick={() => addToCart(p)}
                         className="w-full flex items-center justify-between px-4 py-3 hover:bg-primary-soft transition-colors text-left"
