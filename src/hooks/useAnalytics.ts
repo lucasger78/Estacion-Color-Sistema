@@ -3,6 +3,27 @@ import { supabase } from '../lib/supabaseClient'
 import { todayStart, daysAgo, startOfMonth } from '../utils/formatters'
 import type { Venta } from './useVentas'
 
+// ── Tipos de facturación detallada ─────────────────────────────────────────
+
+export interface FacturacionHoyItem {
+  tipo: 'venta' | 'entrega_cta_cte'
+  id: number
+  descripcion: string
+  monto: number
+  hora: string
+  medio_pago: string | null
+  cliente_nombre: string | null
+}
+
+export interface FacturacionHoyDetalle {
+  items: FacturacionHoyItem[]
+  totalVentas: number
+  totalEntregas: number
+  totalGeneral: number
+  cantVentas: number
+  cantEntregas: number
+}
+
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
 export interface KPISummary {
@@ -307,5 +328,82 @@ export function useStockMetrics() {
       }
     },
     refetchInterval: 120_000,
+  })
+}
+
+/** Detalle de facturación del día: ventas individuales + entregas de cta. cte. */
+export function useFacturacionHoyDetalle() {
+  return useQuery({
+    queryKey: ['analytics', 'facturacion_hoy_detalle'],
+    queryFn: async (): Promise<FacturacionHoyDetalle> => {
+      const hoy = todayStart()
+
+      // 1. Ventas del día
+      const { data: ventas, error: errV } = await supabase
+        .from('ventas')
+        .select('id, numero_comprobante, cliente_nombre, medio_pago, monto_total, fecha_venta')
+        .gte('fecha_venta', hoy)
+        .order('fecha_venta', { ascending: false })
+
+      if (errV) throw errV
+
+      // 2. Entregas de cta. cte. del día (tipo = 'haber' = pago/entrega del cliente)
+      const { data: entregas, error: errE } = await supabase
+        .from('cuenta_corriente_movimientos')
+        .select(`
+          id,
+          cliente_id,
+          monto,
+          medio_pago,
+          descripcion,
+          fecha,
+          clientes ( nombre )
+        `)
+        .eq('tipo', 'haber')
+        .gte('fecha', hoy)
+        .order('fecha', { ascending: false })
+
+      if (errE) throw errE
+
+      // Mapear ventas
+      const ventaItems: FacturacionHoyItem[] = (ventas || []).map((v: any) => ({
+        tipo: 'venta' as const,
+        id: v.id,
+        descripcion: `Venta #${v.numero_comprobante}`,
+        monto: v.monto_total,
+        hora: new Date(v.fecha_venta).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+        medio_pago: v.medio_pago,
+        cliente_nombre: v.cliente_nombre || 'Consumidor Final',
+      }))
+
+      // Mapear entregas
+      const entregaItems: FacturacionHoyItem[] = (entregas || []).map((e: any) => ({
+        tipo: 'entrega_cta_cte' as const,
+        id: e.id,
+        descripcion: `Entrega Cta. Cte. - ${(e.clientes as any)?.nombre || 'Cliente'}`,
+        monto: e.monto,
+        hora: new Date(e.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+        medio_pago: e.medio_pago,
+        cliente_nombre: (e.clientes as any)?.nombre || null,
+      }))
+
+      // Combinar y ordenar por hora (más recientes primero)
+      const items = [...ventaItems, ...entregaItems].sort((a, b) =>
+        b.hora.localeCompare(a.hora)
+      )
+
+      const totalVentas = ventaItems.reduce((s, v) => s + v.monto, 0)
+      const totalEntregas = entregaItems.reduce((s, e) => s + e.monto, 0)
+
+      return {
+        items,
+        totalVentas,
+        totalEntregas,
+        totalGeneral: totalVentas + totalEntregas,
+        cantVentas: ventaItems.length,
+        cantEntregas: entregaItems.length,
+      }
+    },
+    refetchInterval: 30_000,
   })
 }

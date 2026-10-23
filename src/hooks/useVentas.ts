@@ -114,18 +114,19 @@ interface ProcesarVentaParams {
   medio_pago:   string
   notas:        string
   items:        VentaItem[]
+  cliente_id?:  number | null
 }
 
 /**
  * Invoca la función RPC atómica procesar_venta_transaccion.
- * Descuenta stock y registra la venta en una sola transacción.
+ * Descuenta stock y registra la venta (y deuda en Cta. Cte. si aplica) en una sola transacción.
  */
 export function useProcesarVenta() {
   const qc      = useQueryClient()
   const { user } = useAuth()
 
   return useMutation({
-    mutationFn: async ({ cliente, medio_pago, notas, items }: ProcesarVentaParams) => {
+    mutationFn: async ({ cliente, medio_pago, notas, items, cliente_id }: ProcesarVentaParams) => {
       if (!user) throw new Error('No hay sesión activa.')
 
       const p_items = items.map(({ producto_id, variante_id, cantidad, precio_unitario }) => ({
@@ -141,6 +142,7 @@ export function useProcesarVenta() {
         p_medio_pago: medio_pago,
         p_notas:      notas || null,
         p_items:      p_items,
+        p_cliente_id: cliente_id || null,
       })
 
       if (error) throw error
@@ -149,6 +151,9 @@ export function useProcesarVenta() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ventas'] })
       qc.invalidateQueries({ queryKey: ['productos'] })
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      qc.invalidateQueries({ queryKey: ['cliente'] })
     },
   })
 }
+

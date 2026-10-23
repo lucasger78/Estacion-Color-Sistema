@@ -27,38 +27,62 @@ const COLUMN_ALIASES: Record<string, keyof ProductoImportRow> = {
   'descripcion':          'nombre',
   'producto':             'nombre',
   'articulo':             'nombre',
+  'detalle':              'nombre',
 
   // Presentación / medida
   'presentacion':         'presentacion',
   'medida':               'presentacion',
   'presentacion/medida':  'presentacion',
+  'envase':               'presentacion',
+  'formato':              'presentacion',
 
   // Marca
   'marca':                'marca',
+  'proveedor':            'marca',
+  'fabricante':           'marca',
 
   // Precios
+  'costo s/iva':          'precio_costo_sin_iva',
+  'costo sin iva':        'precio_costo_sin_iva',
   'precio s/iva':         'precio_costo_sin_iva',
   'precio sin iva':       'precio_costo_sin_iva',
-  'costo sin iva':        'precio_costo_sin_iva',
+  'costo s iva':          'precio_costo_sin_iva',
+  'precio s iva':         'precio_costo_sin_iva',
+  'costo neto':           'precio_costo_sin_iva',
+
+  'costo c/iva':          'precio_costo_con_iva',
+  'costo con iva':        'precio_costo_con_iva',
   'precio c/iva':         'precio_costo_con_iva',
   'precio con iva':       'precio_costo_con_iva',
-  'costo con iva':        'precio_costo_con_iva',
-  'precio mostrador':     'precio_venta',
+  'costo c iva':          'precio_costo_con_iva',
+  'precio c iva':         'precio_costo_con_iva',
+  'costo final':          'precio_costo_con_iva',
+
   'precio venta':         'precio_venta',
+  'precio de venta':      'precio_venta',
+  'precio mostrador':     'precio_venta',
   'precio publico':       'precio_venta',
+  'precio al publico':    'precio_venta',
+  'venta':                'precio_venta',
 
   // Stock
   'stock':                'stock_actual',
   'stock actual':         'stock_actual',
   'stock disponible':     'stock_actual',
+  'unidades':             'stock_actual',
+  'cantidad':             'stock_actual',
+
   'stock minimo':         'stock_minimo',
   'stock mínimo':         'stock_minimo',
+  'minimo':               'stock_minimo',
 
   // Código de barras
   'codigo barras':        'codigo_barras',
   'código de barras':     'codigo_barras',
+  'codigo de barras':     'codigo_barras',
   'ean':                  'codigo_barras',
 }
+
 
 /** Normaliza un header de columna para el mapeo. */
 function normalizeHeader(h: string): string {

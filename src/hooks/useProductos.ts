@@ -146,7 +146,7 @@ export function useCreateProducto() {
 export function useUpdateProducto() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, ...updates }: ProductoUpdate) => {
+    mutationFn: async ({ id, producto_id, marca_id, ...updates }: ProductoUpdate & { producto_id?: number; marca_id?: number | null }) => {
       // id aquí es variante.id
       const mappedUpdates: any = {
         precio_sin_iva: updates.precio_costo_sin_iva,
@@ -169,11 +169,27 @@ export function useUpdateProducto() {
         .single()
         
       if (error) throw error
+
+      // Si se especificó marca_id, actualizar la tabla productos
+      if (marca_id !== undefined && (producto_id || data?.producto_id)) {
+        const targetProdId = producto_id || data.producto_id
+        const { error: prodErr } = await supabase
+          .from('productos')
+          .update({ marca_id: marca_id })
+          .eq('id', targetProdId)
+
+        if (prodErr) throw prodErr
+      }
+
       return data
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['productos'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['productos'] })
+      qc.invalidateQueries({ queryKey: ['marcas'] })
+    },
   })
 }
+
 
 /** Actualiza precios masivamente por lotes. */
 export function useBulkUpdatePrecios() {

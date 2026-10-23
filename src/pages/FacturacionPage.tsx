@@ -2,14 +2,119 @@ import { useState, useRef, useEffect } from 'react'
 import {
   Search, Plus, Trash2, ShoppingCart, CheckCircle2,
   CreditCard, DollarSign, Smartphone, Building2, Receipt,
-  RefreshCw, Minus, FileText
+  RefreshCw, Minus, FileText, X
 } from 'lucide-react'
 import { useProductos } from '../hooks/useProductos'
+import { useClientes, type Cliente } from '../hooks/useClientes'
 import { useVentasHoy, useProcesarVenta } from '../hooks/useVentas'
+import { usePresupuestos, useCambiarEstadoPresupuesto, type Presupuesto } from '../hooks/usePresupuestos'
 import { formatARS, formatDateTime } from '../utils/formatters'
 import Swal from 'sweetalert2'
 import type { VentaItem } from '../hooks/useVentas'
 import type { Producto } from '../hooks/useProductos'
+
+// ── MODAL CARGAR PRESUPUESTO A FACTURACIÓN ─────────────────────────────────
+
+function CargarPresupuestoModal({
+  isOpen,
+  onClose,
+  onSelectPresupuesto,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onSelectPresupuesto: (presupuesto: Presupuesto) => void
+}) {
+  const [search, setSearch] = useState('')
+  const { data: presupuestos, isLoading } = usePresupuestos(search, 'pendiente')
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 bg-secondary/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-card-lg max-w-2xl w-full p-6 border border-slate-100 flex flex-col max-h-[85vh]">
+        {/* Encabezado */}
+        <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2 text-primary font-bold text-lg">
+            <FileText className="w-5 h-5" />
+            <h3>Cargar Presupuesto a Facturación</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-secondary hover:bg-slate-100 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Buscador */}
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-secondary-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por cliente o número de presupuesto (#PRES-000001)..."
+            className="input-field pl-9 py-2.5 text-sm"
+            autoFocus
+          />
+        </div>
+
+        {/* Lista de Presupuestos Pendientes */}
+        <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-40 gap-2 text-secondary-400">
+              <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+              Buscando presupuestos pendientes...
+            </div>
+          ) : !presupuestos || presupuestos.length === 0 ? (
+            <div className="text-center py-10 text-secondary-400 space-y-2">
+              <FileText className="w-8 h-8 opacity-30 mx-auto" />
+              <p className="text-sm font-medium">No se encontraron presupuestos pendientes.</p>
+            </div>
+          ) : (
+            presupuestos.map((p) => (
+              <div
+                key={p.id}
+                className="p-4 rounded-xl border border-slate-100 hover:border-primary/30 hover:bg-slate-50/50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              >
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-black text-primary text-sm">
+                      #PRES-{String(p.numero_presupuesto).padStart(6, '0')}
+                    </span>
+                    <span className="text-xs text-secondary-400">
+                      • {formatDateTime(p.fecha_presupuesto)}
+                    </span>
+                  </div>
+                  <p className="font-bold text-secondary text-sm">{p.cliente_nombre}</p>
+                  <p className="text-xs text-secondary-400 mt-0.5">
+                    {p.presupuestos_detalle?.length || 0} producto(s) • Validez: {p.validez_dias} días
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 justify-between sm:justify-end">
+                  <span className="text-base font-extrabold text-secondary">
+                    {formatARS(p.monto_total)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onSelectPresupuesto(p)}
+                    className="btn-primary text-xs py-2 px-3.5 bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    Cargar a Carrito
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 // ── Constantes ──────────────────────────────────────────────────────────────
 
@@ -133,13 +238,51 @@ export default function FacturacionPage() {
   const [cart,        setCart]        = useState<CartItemFull[]>([])
   const [medioPago,   setMedioPago]   = useState('efectivo')
   const [cliente,     setCliente]     = useState('')
+  const [clienteId,   setClienteId]   = useState<number | null>(null)
   const [notas,       setNotas]       = useState('')
   const [success,     setSuccess]     = useState<{ comprobante: number; monto: number } | null>(null)
   const [activeTab,   setActiveTab]   = useState<'pos' | 'historial'>('pos')
+  const [presupuestoCargadoId, setPresupuestoCargadoId]   = useState<number | null>(null)
+  const [presupuestoCargadoNum, setPresupuestoCargadoNum] = useState<number | null>(null)
+  const [showCargarPresupuestoModal, setShowCargarPresupuestoModal] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const { data: productos } = useProductos(search)
-  const procesarVenta = useProcesarVenta()
+  const { data: clientes }  = useClientes()
+  const procesarVenta       = useProcesarVenta()
+  const cambiarEstadoPresupuesto = useCambiarEstadoPresupuesto()
+
+  const handleSelectPresupuesto = (p: Presupuesto) => {
+    const loadedItems: CartItemFull[] = (p.presupuestos_detalle || []).map((d) => ({
+      producto_id:     d.producto_id || 0,
+      variante_id:     d.variante_id || d.producto_id || Math.floor(Math.random() * 100000),
+      nombre:          d.nombre_producto,
+      cantidad:        d.cantidad,
+      precio_unitario: d.precio_unitario,
+      precio_venta:    d.precio_unitario,
+    }))
+
+    setCart(loadedItems)
+    if (p.cliente_id) {
+      setClienteId(p.cliente_id)
+      setCliente(p.cliente_nombre)
+    } else {
+      setClienteId(null)
+      setCliente(p.cliente_nombre || '')
+    }
+    setPresupuestoCargadoId(p.id)
+    setPresupuestoCargadoNum(p.numero_presupuesto)
+    setShowCargarPresupuestoModal(false)
+
+    Swal.fire({
+      icon: 'success',
+      title: '¡Presupuesto Cargado!',
+      text: `Se cargó el presupuesto #PRES-${String(p.numero_presupuesto).padStart(6, '0')} al carrito.`,
+      timer: 2000,
+      showConfirmButton: false,
+      customClass: { popup: 'rounded-2xl' },
+    })
+  }
 
   // Cerrar resultados al hacer click fuera
   useEffect(() => {
@@ -208,21 +351,77 @@ export default function FacturacionPage() {
 
   const handleCobrar = async () => {
     if (!cart.length) return
+
+    // Validar si el medio de pago es cuenta corriente
+    if (medioPago === 'cuenta_corriente' && !clienteId) {
+      Swal.fire({
+        title: 'Cliente Requerido',
+        text: 'Para facturar a Cuenta Corriente debés seleccionar un cliente registrado.',
+        icon: 'warning',
+        confirmButtonColor: '#E55B2B'
+      })
+      return
+    }
+
+    // Si hay cliente seleccionado y límite de crédito configurado, verificar límite
+    if (medioPago === 'cuenta_corriente' && clienteId) {
+      const cliObj = clientes?.find((c: Cliente) => c.id === clienteId)
+      if (cliObj && cliObj.limite_credito > 0) {
+        const saldoSimulado = cliObj.saldo_actual + total
+        if (saldoSimulado > cliObj.limite_credito) {
+          const res = await Swal.fire({
+            title: 'Límite de Crédito Superado',
+            html: `La compra supera el límite de crédito de <b>${cliObj.nombre}</b>.<br><br>` +
+                  `Saldo actual: <b>${formatARS(cliObj.saldo_actual)}</b><br>` +
+                  `Monto venta: <b>${formatARS(total)}</b><br>` +
+                  `Límite asignado: <b>${formatARS(cliObj.limite_credito)}</b><br><br>` +
+                  `¿Deseás autorizar de todas formas la venta?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, autorizar',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#E55B2B'
+          })
+          if (!res.isConfirmed) return
+        }
+      }
+    }
+
     try {
+      const selectedCliName = clienteId ? clientes?.find((c: Cliente) => c.id === clienteId)?.nombre : (cliente || 'Consumidor Final')
+
       const result = await procesarVenta.mutateAsync({
-        cliente:    cliente || 'Consumidor Final',
+        cliente:    selectedCliName || 'Consumidor Final',
         medio_pago: medioPago,
         notas,
         items:      cart,
+        cliente_id: clienteId,
       })
+
+      // Si la venta provino de un presupuesto cargado, cambiar su estado a 'aprobado'
+      if (presupuestoCargadoId) {
+        try {
+          await cambiarEstadoPresupuesto.mutateAsync({
+            id: presupuestoCargadoId,
+            estado: 'aprobado',
+          })
+        } catch (e) {
+          console.error('Error al actualizar estado de presupuesto:', e)
+        }
+      }
+
       setSuccess({ comprobante: result.venta_id, monto: result.monto_total })
       setCart([])
       setCliente('')
+      setClienteId(null)
       setNotas('')
+      setPresupuestoCargadoId(null)
+      setPresupuestoCargadoNum(null)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al procesar la venta.')
+      Swal.fire('Error', err instanceof Error ? err.message : 'Error al procesar la venta.', 'error')
     }
   }
+
 
   return (
     <div className="space-y-6">
@@ -249,10 +448,20 @@ export default function FacturacionPage() {
           {/* Buscador y carrito */}
           <div className="lg:col-span-3 space-y-4">
             <div className="card">
-              <h3 className="font-bold text-secondary mb-4 flex items-center gap-2">
-                <Search className="w-4 h-4 text-primary" />
-                Buscar producto
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-secondary flex items-center gap-2">
+                  <Search className="w-4 h-4 text-primary" />
+                  Buscar producto
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowCargarPresupuestoModal(true)}
+                  className="btn-secondary text-xs py-1.5 px-3 bg-primary-soft text-primary hover:bg-primary/20 flex items-center gap-1.5"
+                >
+                  <FileText className="w-4 h-4" />
+                  Cargar Presupuesto
+                </button>
+              </div>
               <div className="relative" ref={searchRef}>
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-secondary-400" />
                 <input
@@ -294,13 +503,32 @@ export default function FacturacionPage() {
 
             {/* Carrito */}
             <div className="card">
-              <h3 className="font-bold text-secondary mb-4 flex items-center gap-2">
-                <ShoppingCart className="w-4 h-4 text-primary" />
-                Carrito
-                {cart.length > 0 && (
-                  <span className="ml-auto badge-admin">{cart.length} ítems</span>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-secondary flex items-center gap-2">
+                  <ShoppingCart className="w-4 h-4 text-primary" />
+                  Carrito
+                  {cart.length > 0 && (
+                    <span className="badge-admin">{cart.length} ítems</span>
+                  )}
+                </h3>
+
+                {presupuestoCargadoNum && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
+                    <span>Presupuesto #PRES-{String(presupuestoCargadoNum).padStart(6, '0')}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPresupuestoCargadoId(null)
+                        setPresupuestoCargadoNum(null)
+                      }}
+                      className="hover:text-red-600 ml-1"
+                      title="Desvincular presupuesto"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
-              </h3>
+              </div>
               {cart.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-32 text-secondary-400 gap-2">
                   <ShoppingCart className="w-8 h-8 opacity-30" />
@@ -355,17 +583,79 @@ export default function FacturacionPage() {
 
               {/* Cliente */}
               <div className="mb-4">
-                <label className="block text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-1.5">
-                  Cliente
-                </label>
-                <input
-                  type="text"
-                  value={cliente}
-                  onChange={(e) => setCliente(e.target.value)}
-                  placeholder="Consumidor Final"
-                  className="input-field"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-secondary-400 uppercase tracking-wider">
+                    Cliente / Cuenta Corriente
+                  </label>
+                  {clienteId && (
+                    <button
+                      onClick={() => { setClienteId(null); setCliente('') }}
+                      className="text-[11px] text-primary hover:underline font-semibold"
+                    >
+                      Restablecer a Consumidor Final
+                    </button>
+                  )}
+                </div>
+
+                <select
+                  value={clienteId || ''}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '') {
+                      setClienteId(null)
+                      setCliente('Consumidor Final')
+                    } else {
+                      const cId = Number(val)
+                      setClienteId(cId)
+                      const found = clientes?.find((c: Cliente) => c.id === cId)
+                      if (found) setCliente(found.nombre)
+                    }
+                  }}
+                  className="input-field cursor-pointer"
+                >
+                  <option value="">Consumidor Final (Cliente Ocasional)</option>
+                  {clientes?.map((c: Cliente) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre} {c.saldo_actual > 0 ? `(Deuda: ${formatARS(c.saldo_actual)})` : '(Al día)'}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Si no hay cliente seleccionado en la lista pero se ingresó un texto libre */}
+                {!clienteId && (
+                  <input
+                    type="text"
+                    value={cliente}
+                    onChange={(e) => setCliente(e.target.value)}
+                    placeholder="O tipear nombre del cliente puntual…"
+                    className="input-field mt-2 text-xs"
+                  />
+                )}
+
+                {/* Info adicional del cliente seleccionado */}
+                {clienteId && (() => {
+                  const selectedCli = clientes?.find((c: Cliente) => c.id === clienteId)
+                  if (!selectedCli) return null
+                  return (
+                    <div className="mt-2 p-2.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-secondary-400">Saldo Deudor: </span>
+                        <span className={`font-bold ${selectedCli.saldo_actual > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                          {formatARS(selectedCli.saldo_actual)}
+                        </span>
+                      </div>
+                      {selectedCli.limite_credito > 0 && (
+                        <div>
+                          <span className="text-secondary-400">Límite: </span>
+                          <span className="font-semibold text-secondary">{formatARS(selectedCli.limite_credito)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+
               </div>
+
 
               {/* Medio de pago */}
               <div className="mb-4">
@@ -448,6 +738,13 @@ export default function FacturacionPage() {
           <HistorialVentas />
         </div>
       )}
+
+      {/* ── Modal Cargar Presupuesto ── */}
+      <CargarPresupuestoModal
+        isOpen={showCargarPresupuestoModal}
+        onClose={() => setShowCargarPresupuestoModal(false)}
+        onSelectPresupuesto={handleSelectPresupuesto}
+      />
     </div>
   )
 }

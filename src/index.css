@@ -8,9 +8,10 @@
   --color-secondary:  #1E293B;
   --color-background: #F8FAFC;
   --color-surface:    #FFFFFF;
-  --sidebar-width:    260px;
+  --sidebar-width:    240px;
   --header-height:    64px;
 }
+
 
 /* ── Reset & Base ── */
 * {
@@ -87,8 +88,9 @@ body {
 
   /* Tarjetas */
   .card {
-    @apply bg-surface rounded-2xl shadow-card border border-slate-100 p-6;
+    @apply bg-surface rounded-2xl shadow-card border border-slate-100 p-4 sm:p-5 lg:p-6;
   }
+
 
   .card-hover {
     @apply card hover:shadow-card-md transition-shadow duration-200;

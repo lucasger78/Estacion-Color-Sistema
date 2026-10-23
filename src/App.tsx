@@ -9,9 +9,12 @@ import LoginPage    from './pages/LoginPage'
 import DashboardPage   from './pages/DashboardPage'
 import InventarioPage  from './pages/InventarioPage'
 import FacturacionPage from './pages/FacturacionPage'
+import ClientesPage    from './pages/ClientesPage'
 import UsuariosPage    from './pages/UsuariosPage'
 import ProveedoresPage from './pages/ProveedoresPage'
 import ConveniosPage   from './pages/ConveniosPage'
+import PresupuestosPage from './pages/PresupuestosPage'
+
 
 // ── Guards ──
 import ProtectedRoute  from './components/layout/ProtectedRoute'
@@ -102,6 +105,9 @@ export default function App() {
 
         {/* Accesible por todos los autenticados */}
         <Route path="/facturacion" element={<FacturacionPage />} />
+        <Route path="/clientes" element={<ClientesPage />} />
+        <Route path="/presupuestos" element={<PresupuestosPage />} />
+
       </Route>
 
       {/* Fallback: sin sesión → login, con sesión → home */}

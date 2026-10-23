@@ -22,6 +22,7 @@ import { useSearchParams } from 'react-router-dom'
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
 interface EditState {
+  marca_id:             string
   precio_costo_sin_iva: string
   precio_costo_con_iva: string
   precio_venta:         string
@@ -29,6 +30,7 @@ interface EditState {
   stock_minimo:         string
   fecha_vencimiento:    string
 }
+
 
 // ── Badge de Stock ──────────────────────────────────────────────────────────
 
@@ -79,20 +81,22 @@ function CargarProductoModal({ marcas, onClose, onSuccess }: CargarProductoModal
           next.precio_con_iva = ''
           next.precio_mostrador = ''
         } else {
-          next.precio_con_iva = (valNum * 1.21).toFixed(2)
-          next.precio_mostrador = (valNum * 1.21 * 1.20).toFixed(2)
+          const conIva = valNum * 1.21
+          next.precio_con_iva = conIva.toFixed(2)
+          next.precio_mostrador = (conIva * 1.35).toFixed(2)
         }
       } else if (field === 'precio_con_iva') {
         if (value === '') {
           next.precio_mostrador = ''
         } else {
-          next.precio_mostrador = (valNum * 1.20).toFixed(2)
+          next.precio_mostrador = (valNum * 1.35).toFixed(2)
         }
       }
       
       return next
     })
   }
+
 
   // Guarda la nueva marca en Supabase y la selecciona
   const handleGuardarMarca = async () => {
@@ -367,19 +371,22 @@ function CargarProductoModal({ marcas, onClose, onSuccess }: CargarProductoModal
 
 function ProductRow({
   producto,
+  marcas,
   isSelected,
   onSelect,
   onSave,
   onDelete
 }: {
   producto: Producto
+  marcas: { id: number; nombre: string }[]
   isSelected: boolean
   onSelect: (selected: boolean) => void
-  onSave: (updates: Partial<Producto> & { id: number }) => void
+  onSave: (updates: Partial<Producto> & { id: number; producto_id?: number; marca_id?: number | null }) => void
   onDelete: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<EditState>({
+    marca_id:             String(producto.marca_id ?? ''),
     precio_costo_sin_iva: String(producto.precio_costo_sin_iva),
     precio_costo_con_iva: String(producto.precio_costo_con_iva),
     precio_venta:         String(producto.precio_venta),
@@ -388,12 +395,36 @@ function ProductRow({
     fecha_vencimiento:    producto.fecha_vencimiento || '',
   })
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const newSinIva = parseFloat(form.precio_costo_sin_iva) || 0
+    const newConIva = parseFloat(form.precio_costo_con_iva) || 0
+    const newVenta  = parseFloat(form.precio_venta) || 0
+    const newMarca  = form.marca_id ? parseInt(form.marca_id) : null
+
+    // Verificar si el precio de venta cambió de forma independiente (sin cambiar los costos)
+    const ventaCambio = newVenta !== producto.precio_venta
+    const costosSinCambio = (newSinIva === producto.precio_costo_sin_iva && newConIva === producto.precio_costo_con_iva)
+
+    if (ventaCambio && costosSinCambio) {
+      const confirm = await Swal.fire({
+        title: '¿Modificar solo el precio de venta?',
+        html: `Estás por modificar el precio de venta de <b>"${producto.nombre}"</b> a <b>${formatARS(newVenta)}</b> sin alterar los precios de costo.<br><br>¿Deseás continuar?`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, modificar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#E55B2B',
+      })
+      if (!confirm.isConfirmed) return
+    }
+
     onSave({
       id:                    producto.id,
-      precio_costo_sin_iva:  parseFloat(form.precio_costo_sin_iva) || 0,
-      precio_costo_con_iva:  parseFloat(form.precio_costo_con_iva) || 0,
-      precio_venta:          parseFloat(form.precio_venta) || 0,
+      producto_id:           producto.producto_id,
+      marca_id:              newMarca,
+      precio_costo_sin_iva:  newSinIva,
+      precio_costo_con_iva:  newConIva,
+      precio_venta:          newVenta,
       stock_actual:          parseInt(form.stock_actual) || 0,
       stock_minimo:          parseInt(form.stock_minimo) || 0,
       fecha_vencimiento:     form.fecha_vencimiento || null,
@@ -403,6 +434,7 @@ function ProductRow({
 
   const handleCancel = () => {
     setForm({
+      marca_id:             String(producto.marca_id ?? ''),
       precio_costo_sin_iva: String(producto.precio_costo_sin_iva),
       precio_costo_con_iva: String(producto.precio_costo_con_iva),
       precio_venta:         String(producto.precio_venta),
@@ -423,17 +455,18 @@ function ProductRow({
           next.precio_costo_con_iva = ''
           next.precio_venta = ''
         } else {
-          next.precio_costo_con_iva = (valNum * 1.21).toFixed(2)
-          next.precio_venta = (valNum * 1.21 * 1.20).toFixed(2)
+          const conIva = valNum * 1.21
+          next.precio_costo_con_iva = conIva.toFixed(2)
+          next.precio_venta = (conIva * 1.35).toFixed(2)
         }
       } else if (field === 'precio_costo_con_iva') {
         if (value === '') {
           next.precio_venta = ''
         } else {
-          next.precio_venta = (valNum * 1.20).toFixed(2)
+          next.precio_venta = (valNum * 1.35).toFixed(2)
         }
       }
-      
+      // Al modificar precio_venta directamente, NO se modifican precio_costo_sin_iva ni precio_costo_con_iva!
       return next
     })
   }
@@ -473,9 +506,22 @@ function ProductRow({
         </div>
       </td>
       <td className="table-cell">
-        <span className="text-xs font-medium text-secondary-400">
-          {producto.marcas?.nombre ?? '—'}
-        </span>
+        {editing ? (
+          <select
+            value={form.marca_id}
+            onChange={(e) => setForm(p => ({ ...p, marca_id: e.target.value }))}
+            className="w-28 px-2 py-1 rounded-lg border border-primary/40 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 bg-white"
+          >
+            <option value="">Sin marca</option>
+            {marcas.map(m => (
+              <option key={m.id} value={m.id}>{m.nombre}</option>
+            ))}
+          </select>
+        ) : (
+          <span className="text-xs font-medium text-secondary-400">
+            {producto.marcas?.nombre ?? '—'}
+          </span>
+        )}
       </td>
       <td className="table-cell text-center">
         {editing ? tdInput('precio_costo_sin_iva') : <span className="text-sm">{formatARS(producto.precio_costo_sin_iva)}</span>}
@@ -552,6 +598,7 @@ function ProductRow({
     </tr>
   )
 }
+
 
 // ── Modal: Actualización de Precios en Bloque ───────────────────────────────
 
@@ -1225,12 +1272,14 @@ export default function InventarioPage() {
                   <ProductRow
                     key={p.id}
                     producto={p}
+                    marcas={marcas}
                     isSelected={selectedIds.includes(p.id)}
                     onSelect={(sel) => handleToggleSelect(p.id, sel)}
                     onSave={(updates) => updateProducto.mutate(updates)}
                     onDelete={() => handleSingleDelete(p)}
                   />
                 ))}
+
               </tbody>
             </table>
           </div>

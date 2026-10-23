@@ -8,6 +8,8 @@ import {
   X,
   Truck,
   Tag,
+  UserCheck,
+  FileText,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -18,11 +20,14 @@ interface SidebarProps {
 const NAV_ITEMS = [
   { to: '/dashboard',   label: 'Dashboard',     icon: LayoutDashboard, adminOnly: true  },
   { to: '/inventario',  label: 'Inventario',    icon: Package,         adminOnly: true  },
+  { to: '/clientes',    label: 'Clientes / Cta Cte', icon: UserCheck,  adminOnly: false },
+  { to: '/presupuestos', label: 'Presupuestos', icon: FileText,        adminOnly: false },
   { to: '/proveedores', label: 'Proveedores',   icon: Truck,           adminOnly: true  },
   { to: '/convenios',   label: 'Convenios',     icon: Tag,             adminOnly: true  },
   { to: '/facturacion', label: 'Facturación',   icon: ShoppingCart,    adminOnly: false },
   { to: '/usuarios',    label: 'Usuarios',      icon: Users,           adminOnly: true  },
 ]
+
 
 export default function Sidebar({ onClose }: SidebarProps) {
   const { profile, isAdmin, signOut } = useAuth()
